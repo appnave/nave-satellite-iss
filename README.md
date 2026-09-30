@@ -83,24 +83,23 @@ composer format
 Classes públicas disponíveis:
 
 ```php
-use Nave\IssSatellite\Mega;
-use Nave\IssSatellite\MegaCloud;
-use Nave\IssSatellite\Ssh;
 use Nave\IssSatellite\Finnet;
-use Nave\IssSatellite\WsCarteira;
+use Nave\IssSatellite\Mega;
+use Nave\IssSatellite\MegaCloud\MegaCloud;
 use Nave\IssSatellite\Multidados;
+use Nave\IssSatellite\Ssh;
+use Nave\IssSatellite\WsCarteira;
 ```
 
 - `Mega` usa a conexão Oracle configurada em `iss-satellite.mega.db`
-- `MegaCloud` usa `default_connection` e autentica por token
 - `Ssh` abre túnel SSH para conexões configuradas
-- `Finnet`, `WsCarteira` e `Multidados` dependem de credenciais que vem do hub
+- `Finnet`, `MegaCloud`, `WsCarteira` e `Multidados` dependem de credenciais que vem do hub
 
 ## Uso básico
 
 ```php
 use Nave\IssSatellite\Mega;
-use Nave\IssSatellite\Facades\MegaCloud;
+use Nave\IssSatellite\MegaCloud;
 use Nave\IssSatellite\Facades\Ssh;
 $megaCredentials = [
     'host' => $credentials['mega_db']['credentials']['MEGA_DB_HOST'],
@@ -124,7 +123,14 @@ $sshConfig = [
 ];
 Ssh::connect($sshConfig);
 
-$response = MegaCloud::setConnection('bild')->get('/globalestruturas/Empreendimentos');
+$megaCloud = resolve(MegaCloud::class)->setCredentials([
+    $credentials['MEGA_CLOUD_HOST'],
+    $credentials['MEGA_CLOUD_PREFIX'],
+    $credentials['MEGA_CLOUD_USER'],
+    $credentials['MEGA_CLOUD_PASSWORD'],
+    $credentials['MEGA_CLOUD_TENANT'],
+]);
+$response = $megaCloud->get('/globalestruturas/Empreendimentos');
 ```
 
 ## Informações adicionais
