@@ -1582,4 +1582,121 @@ class Mega
                 'dt_processamento' => now('America/Sao_Paulo')->toDateTimeString(),
             ]);
     }
+
+    /**
+     * Consulta os valores financeiros do AVRA de uma unidade/contrato
+     * Retorna todas as linhas encontradas, sem cálculos ou arredondamentos
+     *
+     * @param  string  $document  CPF ou CNPJ do comprador formatado com máscara
+     * @param  string|int  $unitCode  Código da unidade
+     * @param  string|int  $contractCode  Código do contrato
+     */
+    public static function getAvraFinancialValues(string $document, string|int $unitCode, string|int $contractCode): array
+    {
+        $query = 'SELECT
+                avra.CTO_RE_VALORCONTRATO,
+                avra.VLR_PAGO,
+                avra.BDS_VLR_ORI,
+                avra.BDS_PAGO
+            FROM bild.alx_viw_bldavra avra
+            WHERE avra.DOCUMENTO = :document
+              AND avra.IDUNIDADE = :unit_code
+              AND avra.CTO_IN_CODIGO = :contract_code';
+
+        return self::connection()->select($query, [
+            'document'      => $document,
+            'unit_code'     => $unitCode,
+            'contract_code' => $contractCode,
+        ]);
+    }
+
+    /**
+     * Consulta os distratos anunciados (status 'A' e tipo 'D')
+     */
+    public static function getAnnouncedTerminations(): array
+    {
+        $query = "SELECT
+                dis.ORG_IN_CODIGO,
+                dis.CTO_IN_CODIGO
+            FROM bild.ALX_CLIINTEGRACAODISTRATO dis
+            WHERE dis.INTEGRACAO_CH_STATUS = 'A'
+              AND dis.ALTERACAO_CH_TIPO = 'D'";
+
+        return self::connection()->select($query);
+    }
+
+    /**
+     * Marca o distrato como processado (status 'P'). Deve ser chamado explicitamente
+     * Retorna a quantidade de linhas afetadas. A escrita é efetivada (commit) ao final
+     * da transação, e em caso de falha é feito rollback e a exceção é propagada
+     *
+     * @param  string|int  $orgCode  Código da organização
+     * @param  string|int  $contractCode  Código do contrato
+     */
+    public static function markTerminationAsProcessed(string|int $orgCode, string|int $contractCode): int
+    {
+        $query = "UPDATE bild.ALX_CLIINTEGRACAODISTRATO
+            SET INTEGRACAO_CH_STATUS = 'P'
+            WHERE ORG_IN_CODIGO = :org_code
+              AND CTO_IN_CODIGO = :contract_code
+              AND INTEGRACAO_CH_STATUS = 'A'
+              AND ALTERACAO_CH_TIPO = 'D'";
+
+        $connection = self::connection();
+
+        return $connection->transaction(fn () => $connection->update($query, [
+            'org_code'      => $orgCode,
+            'contract_code' => $contractCode,
+        ]));
+    }
+
+    /**
+     * Consulta os distratos processados (status 'P' e tipo 'D') dos pares informados
+     * Usuário e data são retornados exatamente como o Mega entrega, sem fuso presumido
+     *
+     * @param  array  $pairs  Lista de pares, ex: [['org' => 1, 'contract' => 10], [1, 11]]
+     */
+    public static function getProcessedTerminations(array $pairs): array
+    {
+        if (empty($pairs)) {
+            return [];
+        }
+
+        $result = [];
+
+        // O Oracle limita a 1000 expressões em uma lista IN
+        foreach (array_chunk(array_values($pairs), 500) as $chunk) {
+            $bindings = [];
+            $placeholders = [];
+
+            foreach ($chunk as $index => $pair) {
+                $org = $pair['org'] ?? $pair[0] ?? null;
+                $contract = $pair['contract'] ?? $pair[1] ?? null;
+
+                if (! is_array($pair) || ! (is_string($org) || is_int($org)) || ! (is_string($contract) || is_int($contract))) {
+                    throw new \InvalidArgumentException('Cada par deve conter organização e contrato (string ou int).');
+                }
+
+                $placeholders[] = "(:org_{$index}, :contract_{$index})";
+                $bindings["org_{$index}"] = $org;
+                $bindings["contract_{$index}"] = $contract;
+            }
+
+            $in = implode(', ', $placeholders);
+
+            $query = "SELECT
+                    dis.ORG_IN_CODIGO,
+                    dis.CTO_IN_CODIGO,
+                    dis.USU_ST_NOME,
+                    dis.CTO_DT_ALTERACAO
+                FROM bild.ALX_CLIINTEGRACAODISTRATO dis
+                WHERE dis.INTEGRACAO_CH_STATUS = 'P'
+                  AND dis.ALTERACAO_CH_TIPO = 'D'
+                  AND (dis.ORG_IN_CODIGO, dis.CTO_IN_CODIGO) IN ({$in})";
+
+            array_push($result, ...self::connection()->select($query, $bindings));
+        }
+
+        return $result;
+    }
 }
